@@ -1,41 +1,34 @@
 {
   "tests": [
     {
-      "name": "basic_inference_test",
-      "input": {
-        "prompt": "Write a short poem about artificial intelligence."
-      },
-      "timeout": 300000
-    },
-    {
-      "name": "openai_messages_test",
+      "name": "laguna_int4_rtx_pro_6000_smoke_test",
       "input": {
         "openai_route": "/v1/chat/completions",
         "openai_input": {
           "messages": [
             {
-              "role": "system",
-              "content": "You are a helpful assistant that writes concise responses."
-            },
-            {
               "role": "user",
-              "content": "Explain what a neural network is in one sentence."
+              "content": "Reply with exactly: ready"
             }
           ],
-          "max_tokens": 200,
-          "temperature": 0.1
+          "max_tokens": 8,
+          "temperature": 0
         }
       },
-      "timeout": 300000
+      "timeout": 1200000
     }
   ],
   "config": {
-    "gpuTypeId": "NVIDIA L40",
+    "gpuTypeId": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
     "gpuCount": 1,
     "env": [
       {
         "key": "MODEL_NAME",
-        "value": "HuggingFaceTB/SmolLM2-135M-Instruct"
+        "value": "poolside/Laguna-S-2.1-INT4"
+      },
+      {
+        "key": "MAX_MODEL_LEN",
+        "value": "32768"
       }
     ],
     "allowedCudaVersions": ["13.0"]

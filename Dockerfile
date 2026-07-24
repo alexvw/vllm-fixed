@@ -3,7 +3,7 @@ FROM nvidia/cuda:13.0.2-devel-ubuntu22.04
 ARG VLLM_VERSION="0.25.0"
 
 RUN apt-get update -y \
-    && apt-get install -y python3-pip curl git \
+    && apt-get install -y python3-pip curl git ffmpeg \
     && curl -LsSf https://astral.sh/uv/install.sh  | sh
 
 ENV PATH="/root/.local/bin:$PATH"

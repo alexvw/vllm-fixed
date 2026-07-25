@@ -10,7 +10,7 @@
     "gpuIds": "ADA_80_PRO,AMPERE_80",
     "gpuCount": 1,
     "allowedCudaVersions": ["13.0"],
-    "presets": [
+    "presets": [ 
       {
         "name": "deepseek-ai/deepseek-r1-distill-llama-8b",
         "defaults": {

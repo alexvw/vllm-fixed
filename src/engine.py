@@ -9,18 +9,11 @@ from typing import AsyncGenerator, Optional
 from dotenv import load_dotenv
 from vllm import AsyncLLMEngine
 from vllm.inputs import TextPrompt
-from vllm.entrypoints.anthropic.protocol import AnthropicMessagesRequest, AnthropicMessagesResponse, AnthropicError, AnthropicErrorResponse
-from vllm.entrypoints.anthropic.serving import AnthropicServingMessages
-from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
-from vllm.entrypoints.openai.chat_completion.serving import OpenAIServingChat
-from vllm.entrypoints.openai.completion.protocol import CompletionRequest
-from vllm.entrypoints.openai.completion.serving import OpenAIServingCompletion
-from vllm.entrypoints.openai.engine.protocol import ErrorResponse
-from vllm.entrypoints.openai.models.protocol import BaseModelPath, LoRAModulePath
-from vllm.entrypoints.openai.models.serving import OpenAIServingModels
-from vllm.entrypoints.openai.responses.protocol import ResponsesRequest, ResponsesResponse
-from vllm.entrypoints.openai.responses.serving import OpenAIServingResponses
-from vllm.entrypoints.serve.render.serving import OpenAIServingRender
+
+# The Runpod worker originally targeted vLLM 0.20.  Its OpenAI/Anthropic
+# serving imports changed in vLLM 0.25, which Laguna requires.  Keep those
+# optional adapters out of module initialization so the native Runpod prompt
+# API can load and exercise the actual model while the adapter is updated.
 
 from constants import DEFAULT_BATCH_SIZE, DEFAULT_BATCH_SIZE_GROWTH_FACTOR, DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_BATCH_SIZE
 from engine_args import get_engine_args

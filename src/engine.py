@@ -9,11 +9,12 @@ from typing import AsyncGenerator, Optional
 from dotenv import load_dotenv
 from vllm import AsyncLLMEngine
 from vllm.inputs import TextPrompt
-
-# The Runpod worker originally targeted vLLM 0.20.  Its OpenAI/Anthropic
-# serving imports changed in vLLM 0.25, which Laguna requires.  Keep those
-# optional adapters out of module initialization so the native Runpod prompt
-# API can load and exercise the actual model while the adapter is updated.
+from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
+from vllm.entrypoints.openai.chat_completion.serving import OpenAIServingChat
+from vllm.entrypoints.openai.engine.protocol import ErrorResponse
+from vllm.entrypoints.openai.models.protocol import BaseModelPath, LoRAModulePath
+from vllm.entrypoints.openai.models.serving import OpenAIServingModels
+from vllm.renderers.online_renderer import OnlineRenderer
 
 from constants import DEFAULT_BATCH_SIZE, DEFAULT_BATCH_SIZE_GROWTH_FACTOR, DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_BATCH_SIZE
 from engine_args import get_engine_args
@@ -289,10 +290,10 @@ class OpenAIvLLMEngine(vLLMEngine):
         if self.tokenizer and hasattr(self.tokenizer, 'tokenizer'):
             chat_template = self.tokenizer.tokenizer.chat_template
 
-        self.openai_serving_render = OpenAIServingRender(
+        # vLLM 0.25 replaced OpenAIServingRender with OnlineRenderer.
+        self.online_renderer = OnlineRenderer(
             model_config=self.llm.model_config,
             renderer=self.llm.renderer,
-            model_registry=self.serving_models.registry,
             request_logger=None,
             chat_template=chat_template,
             chat_template_content_format="auto",
@@ -301,6 +302,7 @@ class OpenAIvLLMEngine(vLLMEngine):
             exclude_tools_when_tool_choice_none=os.getenv('EXCLUDE_TOOLS_WHEN_TOOL_CHOICE_NONE', 'false').lower() == 'true',
             tool_parser=os.getenv('TOOL_CALL_PARSER', "") or None,
             reasoning_parser=os.getenv('REASONING_PARSER', "") or None,
+            default_chat_template_kwargs=None,
             log_error_stack=os.getenv('LOG_ERROR_STACK', 'false').lower() == 'true',
         )
 
@@ -308,7 +310,7 @@ class OpenAIvLLMEngine(vLLMEngine):
             engine_client=self.llm,
             models=self.serving_models,
             response_role=self.response_role,
-            openai_serving_render=self.openai_serving_render,
+            online_renderer=self.online_renderer,
             request_logger=None,
             chat_template=chat_template,
             chat_template_content_format="auto",
@@ -321,46 +323,6 @@ class OpenAIvLLMEngine(vLLMEngine):
             enable_prompt_tokens_details=os.getenv('ENABLE_PROMPT_TOKENS_DETAILS', 'false').lower() == 'true',
             enable_force_include_usage=os.getenv('ENABLE_FORCE_INCLUDE_USAGE', 'false').lower() == 'true',
             enable_log_outputs=os.getenv('ENABLE_LOG_OUTPUTS', 'false').lower() == 'true',
-        )
-        self.completion_engine = OpenAIServingCompletion(
-            engine_client=self.llm,
-            models=self.serving_models,
-            openai_serving_render=self.openai_serving_render,
-            request_logger=None,
-            return_tokens_as_token_ids=os.getenv('RETURN_TOKENS_AS_TOKEN_IDS', 'false').lower() == 'true',
-            enable_prompt_tokens_details=os.getenv('ENABLE_PROMPT_TOKENS_DETAILS', 'false').lower() == 'true',
-            enable_force_include_usage=os.getenv('ENABLE_FORCE_INCLUDE_USAGE', 'false').lower() == 'true',
-        )
-        self.responses_engine = OpenAIServingResponses(
-            engine_client=self.llm,
-            models=self.serving_models,
-            openai_serving_render=self.openai_serving_render,
-            request_logger=None,
-            chat_template=chat_template,
-            chat_template_content_format="auto",
-            return_tokens_as_token_ids=os.getenv('RETURN_TOKENS_AS_TOKEN_IDS', 'false').lower() == 'true',
-            reasoning_parser=os.getenv('REASONING_PARSER', "") or "",
-            enable_auto_tools=os.getenv('ENABLE_AUTO_TOOL_CHOICE', 'false').lower() == 'true',
-            tool_parser=os.getenv('TOOL_CALL_PARSER', "") or None,
-            tool_server=None,
-            enable_prompt_tokens_details=os.getenv('ENABLE_PROMPT_TOKENS_DETAILS', 'false').lower() == 'true',
-            enable_force_include_usage=os.getenv('ENABLE_FORCE_INCLUDE_USAGE', 'false').lower() == 'true',
-            enable_log_outputs=os.getenv('ENABLE_LOG_OUTPUTS', 'false').lower() == 'true',
-        )
-        self.messages_engine = AnthropicServingMessages(
-            engine_client=self.llm,
-            models=self.serving_models,
-            response_role=self.response_role,
-            openai_serving_render=self.openai_serving_render,
-            request_logger=None,
-            chat_template=chat_template,
-            chat_template_content_format="auto",
-            return_tokens_as_token_ids=os.getenv('RETURN_TOKENS_AS_TOKEN_IDS', 'false').lower() == 'true',
-            reasoning_parser=os.getenv('REASONING_PARSER', "") or "",
-            enable_auto_tools=os.getenv('ENABLE_AUTO_TOOL_CHOICE', 'false').lower() == 'true',
-            tool_parser=os.getenv('TOOL_CALL_PARSER', "") or None,
-            enable_prompt_tokens_details=os.getenv('ENABLE_PROMPT_TOKENS_DETAILS', 'false').lower() == 'true',
-            enable_force_include_usage=os.getenv('ENABLE_FORCE_INCLUDE_USAGE', 'false').lower() == 'true',
         )
 
         warmup = getattr(self.chat_engine, 'warmup', None)
@@ -375,29 +337,19 @@ class OpenAIvLLMEngine(vLLMEngine):
 
         if openai_request.openai_route == "/v1/models":
             yield await self._handle_model_request()
-        elif openai_request.openai_route in ["/v1/chat/completions", "/v1/completions"]:
+        elif openai_request.openai_route == "/v1/chat/completions":
             async for response in self._handle_chat_or_completion_request(openai_request):
                 yield response
-        elif openai_request.openai_route == "/v1/responses":
-            async for response in self._handle_responses_request(openai_request):
-                yield response
-        elif openai_request.openai_route == "/v1/messages":
-            async for response in self._handle_messages_request(openai_request):
-                yield response
         else:
-            yield create_error_response("Invalid route").model_dump()
+            yield create_error_response("Unsupported route; use /v1/chat/completions or /v1/models").model_dump()
     
     async def _handle_model_request(self):
         models = await self.serving_models.show_available_models()
         return models.model_dump()
     
     async def _handle_chat_or_completion_request(self, openai_request: JobInput):
-        if openai_request.openai_route == "/v1/chat/completions":
-            request_class = ChatCompletionRequest
-            generator_function = self.chat_engine.create_chat_completion
-        elif openai_request.openai_route == "/v1/completions":
-            request_class = CompletionRequest
-            generator_function = self.completion_engine.create_completion
+        request_class = ChatCompletionRequest
+        generator_function = self.chat_engine.create_chat_completion
         
         try:
             request = request_class(
